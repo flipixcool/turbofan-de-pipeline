@@ -1,0 +1,137 @@
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+
+  kafka1:
+    image: confluentinc/cp-kafka:7.5.0
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka1:9092, PLAINTEXT_HOST://127.0.0.1:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT, PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092, PLAINTEXT_HOST://127.0.0.1:29092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+    depends_on: [zookeeper]
+
+  kafka2:
+    image: confluentinc/cp-kafka:7.5.0
+    ports:
+      - "9093:9092"
+      - "29093:29092"
+    environment:
+      KAFKA_BROKER_ID: 2
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka2:9092, PLAINTEXT_HOST://127.0.0.1:29093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT, PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092, PLAINTEXT_HOST://127.0.0.1:29092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+    depends_on: [zookeeper]
+
+  kafka3:
+    image: confluentinc/cp-kafka:7.5.0
+    ports:
+      - "9094:9092"
+      - "29094:29092"
+    environment:
+      KAFKA_BROKER_ID: 3
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka3:9092, PLAINTEXT_HOST://127.0.0.1:29094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT, PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092, PLAINTEXT_HOST://127.0.0.1:29092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+    depends_on: [zookeeper]
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:23.8
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+
+  postgres-airflow:
+    image: postgres:15
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: passwd
+      POSTGRES_DB: airflow
+
+  airflow-init:
+    image: apache/airflow:2.8.0
+    command: db init
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://user:passwd@postgres-airflow:5432/airflow
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      _AIRFLOW_WWW_USER_USERNAME: "airflow"
+      _AIRFLOW_WWW_USER_PASSWORD: "airflow"
+    depends_on: [postgres-airflow]
+
+  airflow-webserver:
+    image: apache/airflow:2.8.0
+    ports:
+      - "8080:8080"
+    command: webserver
+    volumes:
+      -  ./airflow/dags:/opt/airflow/dags
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://user:passwd@postgres-airflow:5432/airflow
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      _AIRFLOW_WWW_USER_USERNAME: "airflow"
+      _AIRFLOW_WWW_USER_PASSWORD: "airflow"
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    image: apache/airflow:2.8.0
+    command: scheduler
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://user:passwd@postgres-airflow:5432/airflow
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      _AIRFLOW_WWW_USER_USERNAME: "airflow"
+      _AIRFLOW_WWW_USER_PASSWORD: "airflow"
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:v0.7.2
+    ports:
+      - "8090:8080"
+    environment:
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka1:9092, kafka2:9092, kafka3:9092
+      KAFKA_CLUSTERS_0_NAME: local
+    depends_on: [kafka1, kafka2, kafka3]
+
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:v1.7.0
+    restart: on-failure
+    command:
+      - --kafka.server=kafka1:9092
+      - --kafka.server=kafka2:9092
+      - --kafka.server=kafka3:9092
+    depends_on: [kafka1, kafka2, kafka3]
+
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    network_mode: host
+    volumes:
+      - ./prometheus.yaml:/etc/prometheus/prometheus.yaml
+    depends_on: [kafka-exporter]
+
+  grafana:
+    image: grafana/grafana:10.2.0
+    network_mode: host
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    depends_on: [prometheus]
