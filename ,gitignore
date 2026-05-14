@@ -1,0 +1,7 @@
+Iot_venv
+activate
+__pycache__/
+*.pyc
+.env
+*.egg-info/
+dist/
