@@ -1,3 +1,6 @@
+CREATE DATABASE IF NOT EXISTS turbofan;
+USE turbofan;
+
 CREATE TABLE IF NOT EXISTS raw_data (
     engine_id String,
     timestamp DateTime,
