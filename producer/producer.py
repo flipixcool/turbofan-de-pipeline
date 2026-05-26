@@ -3,7 +3,11 @@ from faker import Faker
 import json
 from datetime import datetime
 import time
+import logging
 
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+logger = logging.getLogger(__name__)
 
 producer = Producer({'bootstrap.servers': 'localhost:29092,localhost:29093,localhost:29094'})
 fake = Faker()
@@ -36,6 +40,8 @@ def generate_event():
     }
 
 while True:
-    producer.produce("raw_data", json.dumps(generate_event()).encode('utf-8'))
-    producer.flush() 
+    event = generate_event()
+    producer.produce("raw_data", json.dumps(event).encode('utf-8'))
+    logger.info(f"Sent: {event['engine_id']} cycle={event['cycle']}")
+    producer.flush()
     time.sleep(1)
