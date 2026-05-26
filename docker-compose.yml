@@ -81,12 +81,13 @@ services:
     depends_on: [postgres-airflow]
 
   airflow-webserver:
-    image: apache/airflow:2.8.0
+    # image: apache/airflow:2.8.0
+    build: .
     ports:
       - "8080:8080"
     command: webserver
     volumes:
-      -  ./airflow/dags:/opt/airflow/dags
+      - ./airflow/dags:/opt/airflow/dags
       - ./.pip-cache:/home/airflow/.cache/pip
     environment:
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://user:passwd@postgres-airflow:5432/airflow
@@ -94,14 +95,15 @@ services:
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       _AIRFLOW_WWW_USER_USERNAME: "airflow"
       _AIRFLOW_WWW_USER_PASSWORD: "airflow"
-      _PIP_ADDITIONAL_REQUIREMENTS: clickhouse-driver==0.2.7
+      # _PIP_ADDITIONAL_REQUIREMENTS: clickhouse-driver==0.2.7
       AIRFLOW__WEBSERVER__SECRET_KEY: 'turbofan-secret-key'
     depends_on:
       airflow-init:
         condition: service_completed_successfully
 
   airflow-scheduler:
-    image: apache/airflow:2.8.0
+    build: .
+    #image: apache/airflow:2.8.0
     command: scheduler
     volumes:
       - ./airflow/dags:/opt/airflow/dags
@@ -112,7 +114,7 @@ services:
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       _AIRFLOW_WWW_USER_USERNAME: "airflow"
       _AIRFLOW_WWW_USER_PASSWORD: "airflow"
-      _PIP_ADDITIONAL_REQUIREMENTS: clickhouse-driver==0.2.7
+      # _PIP_ADDITIONAL_REQUIREMENTS: clickhouse-driver==0.2.7
       AIRFLOW__WEBSERVER__SECRET_KEY: 'turbofan-secret-key'
     depends_on:
       airflow-init:

@@ -7,7 +7,7 @@ from datetime import datetime
 def aggregation():
     @task
     def insert_batch():
-        client = Client(host='localhost',
+        client = Client(host='clickhouse',
             port=9000,
             user='user',
             database='turbofan',

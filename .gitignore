@@ -1,7 +1,10 @@
-Iot_venv
+Iot_venv/
 activate
 __pycache__/
 *.pyc
 .env
 *.egg-info/
 dist/
+.pip-cache/
+airflow/**/__pycache__/
+test.py
