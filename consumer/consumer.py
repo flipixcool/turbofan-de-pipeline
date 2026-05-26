@@ -2,6 +2,7 @@ from confluent_kafka import Consumer
 from clickhouse_driver import Client
 import json
 from datetime import datetime
+import logging
 
 consumer = Consumer({'bootstrap.servers': 'localhost:29092,localhost:29093,localhost:29094',
                     'group.id': 'turbofan-pipeline-2',
@@ -29,17 +30,20 @@ def insert_batch(rows):
         rows
     )
 
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+logger = logging.getLogger(__name__)
 BATCH_SIZE = 10
 batch = []
+
 
 try:
     while True:
         msg = consumer.poll(timeout=1.0)
-        print(msg)
+        logger.debug(msg)
         if msg is None:
                 continue
         if msg.error():
-            print(f"Error: {msg.error()}")
+            logger.error(f"Kafka error: {msg.error()}")
             continue
 
         row = parse_message(msg)
@@ -55,6 +59,7 @@ try:
 
         if len(batch) >= BATCH_SIZE:
             insert_batch(batch)
+            logger.info(f"Sent {len(batch)}")
             batch.clear()
 
 
