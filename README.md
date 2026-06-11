@@ -1,5 +1,7 @@
 # turbofan-de-pipeline
 
+[Русская версия](README.ru.md)
+
 Real-time IoT data pipeline for turbofan engine telemetry simulation based on the NASA CMAPSS dataset. Built as DE infrastructure for ML engineers who need a continuous data stream to train RUL (Remaining Useful Life) prediction models.
 
 ## Architecture
