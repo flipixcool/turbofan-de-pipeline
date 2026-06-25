@@ -93,6 +93,8 @@ Kafka UI: `localhost:8090`
 
 **raw_data** — raw telemetry events written by consumer in real time
 
+Consumer reliability: manual Kafka offset commit happens only after successful ClickHouse batch insert, providing at-least-once delivery semantics.
+
 | Column | Type | Description |
 |---|---|---|
 | engine_id | String | Engine identifier |

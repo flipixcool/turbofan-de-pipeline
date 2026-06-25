@@ -91,6 +91,8 @@ Kafka UI: `localhost:8090`
 
 **raw_data** — сырые события телеметрии, которые consumer записывает в реальном времени
 
+Надежность consumer: Kafka offsets коммитятся вручную только после успешной batch-вставки в ClickHouse, что дает at-least-once delivery semantics.
+
 | Колонка | Тип | Описание |
 |---|---|---|
 | engine_id | String | Идентификатор двигателя |
