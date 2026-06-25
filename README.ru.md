@@ -1,14 +1,14 @@
 # turbofan-de-pipeline
 
-IoT-пайплайн данных в реальном времени для симуляции телеметрии турбовентиляторного двигателя на основе датасета NASA CMAPSS. Построен как DE-инфраструктура для ML-инженеров, которым нужен непрерывный поток данных для обучения моделей прогнозирования RUL (Remaining Useful Life, остаточный ресурс).
+IoT-пайплайн данных в реальном времени для симуляции телеметрии турбовентиляторного двигателя в стиле CMAPSS. Построен как DE-инфраструктура для ML-инженеров, которым нужен непрерывный поток данных для обучения моделей прогнозирования RUL (Remaining Useful Life, остаточный ресурс).
 
 ## Архитектура
 
 ```
-Faker Producer (Python)
+Stateful Producer (Python)
   — генерирует события каждую секунду
   — 3 двигателя: engine_001, engine_002, engine_003
-  — аномалии с вероятностью 0.001
+  — аномалии становятся вероятнее при деградации
         ↓
       Kafka
    (topic: raw_data, 3 брокера, replication factor 3)
@@ -137,7 +137,7 @@ turbofan-de-pipeline/
 ├── consumer/
 │   └── consumer.py         # Kafka → ClickHouse consumer (batch=10)
 ├── producer/
-│   └── producer.py         # Producer фейковой телеметрии (1 событие/сек)
+│   └── producer.py         # Stateful producer телеметрии в стиле CMAPSS
 └── sql/
     └── init.sql            # Схема ClickHouse (raw_data, main_stats)
 ```

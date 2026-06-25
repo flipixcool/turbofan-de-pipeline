@@ -2,15 +2,15 @@
 
 [Русская версия](README.ru.md)
 
-Real-time IoT data pipeline for turbofan engine telemetry simulation based on the NASA CMAPSS dataset. Built as DE infrastructure for ML engineers who need a continuous data stream to train RUL (Remaining Useful Life) prediction models.
+Real-time IoT data pipeline for CMAPSS-inspired turbofan engine telemetry simulation. Built as DE infrastructure for ML engineers who need a continuous data stream to train RUL (Remaining Useful Life) prediction models.
 
 ## Architecture
 
 ```
-Faker Producer (Python)
+CMAPSS-inspired Stateful Producer (Python)
   — generates events every second
   — 3 engines: engine_001, engine_002, engine_003
-  — anomalies with 0.001 probability
+  — anomalies become more likely as engines degrade
         ↓
       Kafka
    (topic: raw_data, 3 brokers, replication factor 3)
@@ -139,7 +139,7 @@ turbofan-de-pipeline/
 ├── consumer/
 │   └── consumer.py         # Kafka → ClickHouse consumer (batch=10)
 ├── producer/
-│   └── producer.py         # Fake telemetry producer (1 event/sec)
+│   └── producer.py         # CMAPSS-inspired stateful telemetry producer
 └── sql/
     └── init.sql            # ClickHouse schema (raw_data, main_stats)
 ```
