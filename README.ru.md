@@ -87,14 +87,17 @@ Airflow: `localhost:8080` — логин из `.env` (`AIRFLOW_USER` / `AIRFLOW_
 Grafana: `localhost:3000` — логин `admin` / значение из `.env` (`GF_SECURITY_ADMIN_PASSWORD`)  
 Kafka UI: `localhost:8090`
 
+Примечание по схеме: если изменения схемы не применились к существующему локальному ClickHouse volume, выполните `docker compose down -v`, затем `docker compose up -d --build`.
+
 ## Схема данных
 
 **raw_data** — сырые события телеметрии, которые consumer записывает в реальном времени
 
-Надежность consumer: Kafka offsets коммитятся вручную только после успешной batch-вставки в ClickHouse, что дает at-least-once delivery semantics.
+Надежность consumer: Kafka offsets коммитятся вручную только после успешной batch-вставки в ClickHouse, что дает at-least-once delivery semantics. Сырые события содержат `event_id`, поэтому дубликаты после retry можно обнаружить.
 
 | Колонка | Тип | Описание |
 |---|---|---|
+| event_id | String | Детерминированный идентификатор события для поиска дубликатов |
 | engine_id | String | Идентификатор двигателя |
 | timestamp | DateTime | Время события |
 | cycle | UInt16 | Номер полетного цикла |
@@ -104,17 +107,26 @@ Kafka UI: `localhost:8090`
 | T2 | Float32 | Температура на входе вентилятора (°R) |
 | T50 | Float32 | Температура на выходе LPT (°R) |
 | P2 | Float32 | Давление на входе вентилятора (psia) |
+| P15 | Float32 | Давление в bypass duct (psia) |
 | Nf | Float32 | Скорость вентилятора (rpm) |
 | Nc | Float32 | Скорость ядра (rpm) |
+| Ps30 | Float32 | Статическое давление на выходе HPC |
+| phi | Float32 | Сигнал соотношения топливо/воздух |
+| NRf | Float32 | Скорректированная скорость вентилятора |
+| NRc | Float32 | Скорректированная скорость ядра |
+| BPR | Float32 | Bypass ratio |
 | anomaly | Bool | Флаг аномалии |
 | RUL | UInt16 | Остаточный ресурс (циклы) |
 
 **main_stats** — 5-минутные агрегаты по каждому двигателю, рассчитанные Airflow DAG
 
+Airflow агрегирует фиксированные 5-минутные окна и перед вставкой удаляет/перезаписывает точное окно, поэтому retry не создает дубликаты агрегатов.
+
 | Колонка | Тип | Описание |
 |---|---|---|
+| window_start | DateTime | Начало окна агрегации, включительно |
+| window_end | DateTime | Конец окна агрегации, не включительно |
 | engine_id | String | Идентификатор двигателя |
-| timestamp | DateTime | Время агрегации |
 | avg_T2 | Float32 | Средняя температура на входе вентилятора |
 | avg_T50 | Float32 | Средняя температура на выходе турбины |
 | avg_Nf | Float32 | Средняя скорость вентилятора |

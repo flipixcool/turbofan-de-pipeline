@@ -89,14 +89,17 @@ Airflow: `localhost:8080` — login from `.env` (`AIRFLOW_USER` / `AIRFLOW_PASSW
 Grafana: `localhost:3000` — login `admin` / value from `.env` (`GF_SECURITY_ADMIN_PASSWORD`)  
 Kafka UI: `localhost:8090`
 
+Schema note: if schema changes are not applied to an existing local ClickHouse volume, run `docker compose down -v` and then `docker compose up -d --build`.
+
 ## Data Schema
 
 **raw_data** — raw telemetry events written by consumer in real time
 
-Consumer reliability: manual Kafka offset commit happens only after successful ClickHouse batch insert, providing at-least-once delivery semantics.
+Consumer reliability: manual Kafka offset commit happens only after successful ClickHouse batch insert, providing at-least-once delivery semantics. Raw events include `event_id`, so duplicate raw records are detectable after retries.
 
 | Column | Type | Description |
 |---|---|---|
+| event_id | String | Deterministic event identifier for duplicate detection |
 | engine_id | String | Engine identifier |
 | timestamp | DateTime | Event time |
 | cycle | UInt16 | Flight cycle number |
@@ -106,17 +109,26 @@ Consumer reliability: manual Kafka offset commit happens only after successful C
 | T2 | Float32 | Fan inlet temperature (°R) |
 | T50 | Float32 | LPT outlet temperature (°R) |
 | P2 | Float32 | Fan inlet pressure (psia) |
+| P15 | Float32 | Bypass duct pressure (psia) |
 | Nf | Float32 | Fan speed (rpm) |
 | Nc | Float32 | Core speed (rpm) |
+| Ps30 | Float32 | Static pressure at HPC outlet |
+| phi | Float32 | Fuel-air ratio signal |
+| NRf | Float32 | Corrected fan speed |
+| NRc | Float32 | Corrected core speed |
+| BPR | Float32 | Bypass ratio |
 | anomaly | Bool | Anomaly flag |
 | RUL | UInt16 | Remaining useful life (cycles) |
 
 **main_stats** — 5-minute aggregates per engine computed by Airflow DAG
 
+Airflow aggregates fixed 5-minute windows and deletes/reinserts the exact window before inserting, so retries do not create duplicate aggregate rows.
+
 | Column | Type | Description |
 |---|---|---|
+| window_start | DateTime | Inclusive aggregation window start |
+| window_end | DateTime | Exclusive aggregation window end |
 | engine_id | String | Engine identifier |
-| timestamp | DateTime | Aggregation time |
 | avg_T2 | Float32 | Avg fan inlet temperature |
 | avg_T50 | Float32 | Avg turbine outlet temperature |
 | avg_Nf | Float32 | Avg fan speed |

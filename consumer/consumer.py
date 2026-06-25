@@ -51,14 +51,19 @@ def message_location(msg):
 
 def parse_message(msg):
     data = json.loads(msg.value().decode('utf-8'))
-    data['timestamp'] = datetime.fromisoformat(data['timestamp'])
+    raw_timestamp = data['timestamp']
+    data['timestamp'] = datetime.fromisoformat(raw_timestamp)
     data['anomaly'] = bool(data['anomaly'])
+
+    if not data.get('event_id'):
+        data['event_id'] = f"{data['engine_id']}-{data['cycle']}-{raw_timestamp}"
+
     return data
 
 
 def to_clickhouse_row(row):
     return [
-        row['engine_id'], row['timestamp'], row['cycle'],
+        row['event_id'], row['engine_id'], row['timestamp'], row['cycle'],
         row['altitude'], row['mach_number'], row['throttle'],
         row['T2'], row['T50'], row['P2'], row['P15'],
         row['Nf'], row['Nc'], row['Ps30'], row['phi'],
@@ -69,7 +74,16 @@ def to_clickhouse_row(row):
 
 def insert_batch(rows):
     client.execute(
-        'INSERT INTO raw_data VALUES',
+        """
+        INSERT INTO raw_data (
+            event_id, engine_id, timestamp, cycle,
+            altitude, mach_number, throttle,
+            T2, T50, P2, P15,
+            Nf, Nc, Ps30, phi,
+            NRf, NRc, BPR,
+            anomaly, RUL
+        ) VALUES
+        """,
         rows
     )
 
