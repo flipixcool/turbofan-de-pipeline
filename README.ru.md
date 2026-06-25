@@ -75,20 +75,12 @@ cd turbofan-de-pipeline
 cp .env.example .env
 # отредактируйте .env, указав свои учетные данные
 
-# 3. Собрать и запустить инфраструктуру
-docker compose build
-docker compose up -d
+# 3. Собрать и запустить пайплайн
+docker compose up -d --build
 
-# 4. Установить Python-зависимости
-python3.11 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-
-# 5. Запустить producer
-python producer/producer.py
-
-# 6. Запустить consumer
-python consumer/consumer.py
+# 4. Проверить логи producer и consumer
+docker compose logs -f producer
+docker compose logs -f consumer
 ```
 
 Airflow: `localhost:8080` — логин из `.env` (`AIRFLOW_USER` / `AIRFLOW_PASSWORD`)  

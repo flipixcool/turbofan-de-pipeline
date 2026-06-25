@@ -3,20 +3,44 @@ from clickhouse_driver import Client
 import json
 from datetime import datetime
 import logging
+import os
 
-consumer = Consumer({'bootstrap.servers': 'localhost:29092,localhost:29093,localhost:29094',
-                    'group.id': 'turbofan-pipeline-2',
+
+def get_env(name):
+    value = os.getenv(name)
+    if value is None:
+        raise RuntimeError(f"Missing required environment variable: {name}")
+    return value
+
+
+def get_int_env(name):
+    return int(get_env(name))
+
+
+kafka_bootstrap_servers = get_env("KAFKA_BOOTSTRAP_SERVERS")
+kafka_topic = get_env("KAFKA_TOPIC")
+consumer_group_id = get_env("CONSUMER_GROUP_ID")
+consumer_batch_size = get_int_env("CONSUMER_BATCH_SIZE")
+
+clickhouse_host = get_env("CLICKHOUSE_HOST")
+clickhouse_port = get_int_env("CLICKHOUSE_PORT")
+clickhouse_user = get_env("CLICKHOUSE_USER")
+clickhouse_password = get_env("CLICKHOUSE_PASSWORD")
+clickhouse_database = get_env("CLICKHOUSE_DATABASE")
+
+consumer = Consumer({'bootstrap.servers': kafka_bootstrap_servers,
+                    'group.id': consumer_group_id,
                     'auto.offset.reset' : 'earliest'})
 
 
 
-client = Client(host='localhost',
-                port=9000,
-                user='user',
-                database='turbofan',
-                password='passwd')
+client = Client(host=clickhouse_host,
+                port=clickhouse_port,
+                user=clickhouse_user,
+                database=clickhouse_database,
+                password=clickhouse_password)
 
-consumer.subscribe(['raw_data'])
+consumer.subscribe([kafka_topic])
 
 def parse_message(msg):
     data = json.loads(msg.value().decode('utf-8'))
@@ -32,7 +56,6 @@ def insert_batch(rows):
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger(__name__)
-BATCH_SIZE = 10
 batch = []
 
 
@@ -57,7 +80,7 @@ try:
             ])
 
 
-        if len(batch) >= BATCH_SIZE:
+        if len(batch) >= consumer_batch_size:
             insert_batch(batch)
             logger.info(f"Sent {len(batch)}")
             batch.clear()

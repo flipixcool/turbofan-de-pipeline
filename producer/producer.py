@@ -2,6 +2,7 @@ from confluent_kafka import Producer
 from faker import Faker
 import json
 from datetime import datetime
+import os
 import time
 import logging
 
@@ -9,7 +10,19 @@ import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger(__name__)
 
-producer = Producer({'bootstrap.servers': 'localhost:29092,localhost:29093,localhost:29094'})
+
+def get_env(name):
+    value = os.getenv(name)
+    if value is None:
+        raise RuntimeError(f"Missing required environment variable: {name}")
+    return value
+
+
+kafka_bootstrap_servers = get_env("KAFKA_BOOTSTRAP_SERVERS")
+kafka_topic = get_env("KAFKA_TOPIC")
+producer_interval_seconds = float(get_env("PRODUCER_INTERVAL_SECONDS"))
+
+producer = Producer({'bootstrap.servers': kafka_bootstrap_servers})
 fake = Faker()
 
 cycle = 0
@@ -41,7 +54,7 @@ def generate_event():
 
 while True:
     event = generate_event()
-    producer.produce("raw_data", json.dumps(event).encode('utf-8'))
+    producer.produce(kafka_topic, json.dumps(event).encode('utf-8'))
     logger.info(f"Sent: {event['engine_id']} cycle={event['cycle']}")
     producer.flush()
-    time.sleep(1)
+    time.sleep(producer_interval_seconds)
