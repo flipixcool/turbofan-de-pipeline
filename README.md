@@ -1,159 +1,248 @@
-# turbofan-de-pipeline
+# CMAPSS-inspired Real-Time Turbofan Telemetry Pipeline
 
 [Русская версия](README.ru.md)
 
-Real-time IoT data pipeline for CMAPSS-inspired turbofan engine telemetry simulation. Built as DE infrastructure for ML engineers who need a continuous data stream to train RUL (Remaining Useful Life) prediction models.
+## Project Overview
+
+This is a local real-time data engineering pipeline that simulates turbofan engine telemetry, streams events through Kafka, stores raw telemetry in ClickHouse, and builds 5-minute aggregate statistics with Airflow. The telemetry generator is CMAPSS-inspired, but it does not replay the real NASA CMAPSS dataset. It is designed as a Junior Data Engineering portfolio project that demonstrates ingestion, batching, analytical storage, orchestration, and reliability tradeoffs in one Docker Compose stack.
+
+## Why This Project Exists
+
+Predictive maintenance and RUL/ML teams need a continuous stream of engine telemetry before they can build useful models and dashboards. They need raw event storage for audits and reprocessing, aggregate features for analysis, anomaly counts for monitoring, and reliable delivery behavior when downstream storage is temporarily unavailable. This project models that engineering scenario locally with simple, readable components.
 
 ## Architecture
 
-```
-CMAPSS-inspired Stateful Producer (Python)
-  — generates events every second
-  — 3 engines: engine_001, engine_002, engine_003
-  — anomalies become more likely as engines degrade
-        ↓
-      Kafka
-   (topic: raw_data, 3 brokers, replication factor 3)
-        ↓
-  Python Consumer
-        ↓
-    ClickHouse
-   (raw_data + main_stats)
-        ↓
-  Airflow DAG
-   (aggregations every 5 minutes → main_stats)
-        ↓
-    Grafana dashboard
-        ↑
-  Prometheus + kafka-exporter
-   (Kafka metrics)
+```mermaid
+flowchart LR
+    Producer[Python Producer<br/>stateful telemetry simulator] --> Kafka[Kafka topic<br/>raw_data]
+    Kafka --> Consumer[Python Consumer<br/>batch inserts]
+    Consumer --> Raw[(ClickHouse raw_data)]
+    Raw --> Airflow[Airflow DAG<br/>5-minute windows]
+    Airflow --> Stats[(ClickHouse main_stats)]
+    Stats --> Users[Grafana / SQL]
+    KafkaUI[Kafka UI] -. monitors .-> Kafka
+    Prometheus[Prometheus] -. scrapes .-> KafkaExporter[kafka-exporter]
+    Grafana -. queries / dashboards .-> Stats
 ```
 
-## Stack
+Docker Compose also includes Kafka UI for broker/topic inspection, Prometheus with kafka-exporter for metrics, and Grafana for visualization work.
 
-| Tool | Version | Role |
-|---|---|---|
-| Apache Kafka | 7.5.0 (Confluent) | Message broker |
-| ClickHouse | 23.8 | Analytical storage |
-| Apache Airflow | 2.8.0 | Orchestration |
-| Grafana | 10.2.0 | Visualization |
-| Prometheus | 2.45.0 | Metrics collection |
-| PostgreSQL | 15 | Airflow metadata DB |
-| Python | 3.11 | Producer & Consumer |
-| Docker Compose | — | Infrastructure |
+## Tech Stack
 
-## Services & Ports
+- Python for the producer and consumer.
+- Apache Kafka for streaming raw telemetry events.
+- ClickHouse for raw and aggregate analytical storage.
+- Apache Airflow for scheduled 5-minute aggregations.
+- Docker Compose for local infrastructure.
+- PostgreSQL for Airflow metadata.
+- Prometheus and Grafana for observability and visualization.
 
-| Service | Port |
-|---|---|
-| Airflow UI | 8080 |
-| Kafka UI | 8090 |
-| ClickHouse HTTP | 8123 |
-| ClickHouse native | 9000 |
-| Kafka broker 1 | 29092 |
-| Kafka broker 2 | 29093 |
-| Kafka broker 3 | 29094 |
-| Grafana | 3000 |
-| Prometheus | 9090 |
+## Data Flow
 
-## Prerequisites
+1. Producer generates stateful turbofan telemetry events.
+2. Events are sent to Kafka topic `raw_data` with `engine_id` as the Kafka message key.
+3. Consumer reads Kafka messages in batches.
+4. Consumer inserts raw events into ClickHouse table `raw_data`.
+5. Consumer commits Kafka offsets only after a successful ClickHouse insert.
+6. Airflow builds idempotent 5-minute aggregates into `main_stats`.
+7. Data can be queried from ClickHouse and visualized later in Grafana.
 
-- Docker + Docker Compose
-- Python 3.11
-- Add to `/etc/hosts`:
+## Engineering Highlights
 
-```
-127.0.0.1 kafka1 kafka2 kafka3
-```
+- One-command local infrastructure with Docker Compose.
+- Stateful telemetry simulator instead of fully random events.
+- Kafka partitioning by `engine_id` key.
+- ClickHouse raw and aggregate analytical storage.
+- Batch inserts into ClickHouse.
+- Manual Kafka offset commits after successful inserts.
+- At-least-once delivery semantics.
+- `event_id`-based duplicate detection.
+- Idempotent Airflow aggregation windows.
+- Observability stack included.
+
+## Reliability Notes
+
+The pipeline provides at-least-once delivery. Kafka offsets are committed only after ClickHouse accepts a batch, which prevents silent data loss when ClickHouse insert fails. If a failure happens after ClickHouse insert but before Kafka offset commit, Kafka may replay the same records and duplicates may appear in `raw_data`. Each raw event stores `event_id`, so duplicates are detectable. Airflow aggregates are idempotent because each DAG run deletes and recomputes one fixed 5-minute window before inserting fresh aggregate rows.
+
+This is not exactly-once delivery and is not presented as production-ready infrastructure.
+
+## Data Model
+
+`raw_data` stores raw telemetry events:
+
+- `event_id`, `engine_id`, `timestamp`, `cycle`
+- sensor fields such as `altitude`, `mach_number`, `throttle`, `T2`, `T50`, `P2`, `P15`, `Nf`, `Nc`, `Ps30`, `phi`, `NRf`, `NRc`, `BPR`
+- `anomaly`, `RUL`
+
+`main_stats` stores fixed 5-minute aggregate windows:
+
+- `window_start`, `window_end`, `engine_id`
+- average sensor metrics
+- `anomaly_count`
+- `min_RUL`
 
 ## Quick Start
 
 ```bash
-# 1. Clone
-git clone https://github.com/flipixcool/turbofan-de-pipeline
-cd turbofan-de-pipeline
-
-# 2. Configure environment
 cp .env.example .env
-# edit .env with your credentials
-
-# 3. Build and start the pipeline
 docker compose up -d --build
+docker compose ps
+```
 
-# 4. Check producer and consumer logs
+## Useful URLs
+
+- Airflow: http://localhost:8080
+- Kafka UI: http://localhost:8090
+- ClickHouse HTTP: http://localhost:8123
+- Grafana: http://localhost:3000
+- Prometheus: http://localhost:9090
+
+## Verification Commands
+
+Producer logs:
+
+```bash
 docker compose logs -f producer
+```
+
+Consumer logs:
+
+```bash
 docker compose logs -f consumer
 ```
 
-Airflow: `localhost:8080` — login from `.env` (`AIRFLOW_USER` / `AIRFLOW_PASSWORD`)  
-Grafana: `localhost:3000` — login `admin` / value from `.env` (`GF_SECURITY_ADMIN_PASSWORD`)  
-Kafka UI: `localhost:8090`
+Raw row count:
 
-Schema note: if schema changes are not applied to an existing local ClickHouse volume, run `docker compose down -v` and then `docker compose up -d --build`.
-
-## Data Schema
-
-**raw_data** — raw telemetry events written by consumer in real time
-
-Consumer reliability: manual Kafka offset commit happens only after successful ClickHouse batch insert, providing at-least-once delivery semantics. Raw events include `event_id`, so duplicate raw records are detectable after retries.
-
-| Column | Type | Description |
-|---|---|---|
-| event_id | String | Deterministic event identifier for duplicate detection |
-| engine_id | String | Engine identifier |
-| timestamp | DateTime | Event time |
-| cycle | UInt16 | Flight cycle number |
-| altitude | Float32 | Altitude (ft) |
-| mach_number | Float32 | Mach number |
-| throttle | Float32 | Throttle (%) |
-| T2 | Float32 | Fan inlet temperature (°R) |
-| T50 | Float32 | LPT outlet temperature (°R) |
-| P2 | Float32 | Fan inlet pressure (psia) |
-| P15 | Float32 | Bypass duct pressure (psia) |
-| Nf | Float32 | Fan speed (rpm) |
-| Nc | Float32 | Core speed (rpm) |
-| Ps30 | Float32 | Static pressure at HPC outlet |
-| phi | Float32 | Fuel-air ratio signal |
-| NRf | Float32 | Corrected fan speed |
-| NRc | Float32 | Corrected core speed |
-| BPR | Float32 | Bypass ratio |
-| anomaly | Bool | Anomaly flag |
-| RUL | UInt16 | Remaining useful life (cycles) |
-
-**main_stats** — 5-minute aggregates per engine computed by Airflow DAG
-
-Airflow aggregates fixed 5-minute windows and deletes/reinserts the exact window before inserting, so retries do not create duplicate aggregate rows.
-
-| Column | Type | Description |
-|---|---|---|
-| window_start | DateTime | Inclusive aggregation window start |
-| window_end | DateTime | Exclusive aggregation window end |
-| engine_id | String | Engine identifier |
-| avg_T2 | Float32 | Avg fan inlet temperature |
-| avg_T50 | Float32 | Avg turbine outlet temperature |
-| avg_Nf | Float32 | Avg fan speed |
-| avg_Nc | Float32 | Avg core speed |
-| avg_P2 | Float32 | Avg inlet pressure |
-| avg_Ps30 | Float32 | Avg static pressure |
-| anomaly_count | UInt16 | Anomaly count in window |
-| min_RUL | UInt16 | Minimum RUL in window |
-
-## Project Structure
-
+```bash
+docker compose exec -T clickhouse clickhouse-client \
+  --user user --password passwd --database turbofan \
+  --query "SELECT count() FROM raw_data"
 ```
-turbofan-de-pipeline/
-├── Dockerfile              # Custom Airflow image with clickhouse-driver
-├── docker-compose.yml      # Full infrastructure with healthchecks
-├── prometheus.yaml         # Prometheus scrape config
-├── requirements.txt        # Python dependencies
-├── .env.example            # Environment variables template
-├── airflow/
-│   └── dags/
-│       └── aggregation.py  # DAG: INSERT INTO main_stats every 5 min
-├── consumer/
-│   └── consumer.py         # Kafka → ClickHouse consumer (batch=10)
-├── producer/
-│   └── producer.py         # CMAPSS-inspired stateful telemetry producer
-└── sql/
-    └── init.sql            # ClickHouse schema (raw_data, main_stats)
+
+`event_id` presence:
+
+```bash
+docker compose exec -T clickhouse clickhouse-client \
+  --user user --password passwd --database turbofan \
+  --query "SELECT count(), countIf(event_id != '') FROM raw_data"
 ```
+
+Duplicate detection:
+
+```bash
+docker compose exec -T clickhouse clickhouse-client \
+  --user user --password passwd --database turbofan \
+  --query "SELECT event_id, count() FROM raw_data GROUP BY event_id HAVING count() > 1 LIMIT 10"
+```
+
+Aggregate windows:
+
+```bash
+docker compose exec -T clickhouse clickhouse-client \
+  --user user --password passwd --database turbofan \
+  --query "SELECT window_start, window_end, count() FROM main_stats GROUP BY window_start, window_end ORDER BY window_start DESC LIMIT 10"
+```
+
+Smoke test:
+
+```bash
+make smoke-test
+```
+
+## SQL Examples
+
+Latest raw events:
+
+```sql
+SELECT event_id, engine_id, timestamp, cycle, RUL, anomaly
+FROM raw_data
+ORDER BY timestamp DESC
+LIMIT 10;
+```
+
+Row count and non-empty `event_id` count:
+
+```sql
+SELECT count() AS rows, countIf(event_id != '') AS rows_with_event_id
+FROM raw_data;
+```
+
+Duplicate `event_id` detection:
+
+```sql
+SELECT event_id, count() AS duplicates
+FROM raw_data
+GROUP BY event_id
+HAVING duplicates > 1
+ORDER BY duplicates DESC
+LIMIT 10;
+```
+
+Minimum RUL per engine:
+
+```sql
+SELECT engine_id, min(RUL) AS min_rul
+FROM raw_data
+GROUP BY engine_id
+ORDER BY engine_id;
+```
+
+Anomaly count per engine:
+
+```sql
+SELECT engine_id, countIf(anomaly = true) AS anomaly_count
+FROM raw_data
+GROUP BY engine_id
+ORDER BY engine_id;
+```
+
+Latest 5-minute aggregate windows:
+
+```sql
+SELECT window_start, window_end, engine_id, avg_T2, avg_T50, anomaly_count, min_RUL
+FROM main_stats
+ORDER BY window_start DESC, engine_id
+LIMIT 20;
+```
+
+## Reset Local State
+
+If schema changes are not applied because old ClickHouse volumes exist, recreate local volumes:
+
+```bash
+docker compose down -v
+docker compose up -d --build
+```
+
+## Makefile Commands
+
+```bash
+make up
+make down
+make restart
+make ps
+make logs
+make logs-producer
+make logs-consumer
+make smoke-test
+make clean
+```
+
+## Known Limitations
+
+- Uses simulated CMAPSS-inspired data, not real CMAPSS replay.
+- No Schema Registry yet.
+- No dbt layer yet.
+- No CI/tests yet.
+- Grafana dashboards may need manual setup unless provisioning is added later.
+- Raw layer detects duplicates but does not fully enforce exactly-once semantics.
+
+## Future Improvements
+
+- Real CMAPSS replay mode.
+- Schema Registry.
+- dbt models for marts and data tests.
+- ReplacingMergeTree or materialized view deduplication.
+- Grafana dashboard provisioning.
+- CI pipeline.
+- Dead-letter queue for malformed messages.

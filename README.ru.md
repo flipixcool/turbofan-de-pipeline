@@ -1,157 +1,248 @@
-# turbofan-de-pipeline
+# CMAPSS-inspired Real-Time Turbofan Telemetry Pipeline
 
-IoT-пайплайн данных в реальном времени для симуляции телеметрии турбовентиляторного двигателя в стиле CMAPSS. Построен как DE-инфраструктура для ML-инженеров, которым нужен непрерывный поток данных для обучения моделей прогнозирования RUL (Remaining Useful Life, остаточный ресурс).
+[English version](README.md)
+
+## Обзор проекта
+
+Это локальный real-time data engineering pipeline для симуляции телеметрии турбовентиляторного двигателя. Он отправляет события через Kafka, сохраняет сырые данные в ClickHouse и строит 5-минутные агрегаты через Airflow. Генератор вдохновлен CMAPSS, но не проигрывает настоящий NASA CMAPSS dataset. Проект сделан как понятное портфолио Junior Data Engineer.
+
+## Зачем нужен проект
+
+Командам predictive maintenance и RUL/ML нужен постоянный поток телеметрии, сырые события для аудита и переобработки, агрегированные признаки, счетчики аномалий и надежная доставка данных. Этот проект показывает такой сценарий локально и без лишней сложности.
 
 ## Архитектура
 
-```
-Stateful Producer (Python)
-  — генерирует события каждую секунду
-  — 3 двигателя: engine_001, engine_002, engine_003
-  — аномалии становятся вероятнее при деградации
-        ↓
-      Kafka
-   (topic: raw_data, 3 брокера, replication factor 3)
-        ↓
-  Python Consumer
-        ↓
-    ClickHouse
-   (raw_data + main_stats)
-        ↓
-  Airflow DAG
-   (агрегации каждые 5 минут → main_stats)
-        ↓
-    Grafana dashboard
-        ↑
-  Prometheus + kafka-exporter
-   (метрики Kafka)
+```mermaid
+flowchart LR
+    Producer[Python Producer<br/>stateful simulator] --> Kafka[Kafka topic<br/>raw_data]
+    Kafka --> Consumer[Python Consumer<br/>batch inserts]
+    Consumer --> Raw[(ClickHouse raw_data)]
+    Raw --> Airflow[Airflow DAG<br/>5-minute windows]
+    Airflow --> Stats[(ClickHouse main_stats)]
+    Stats --> Users[Grafana / SQL]
+    KafkaUI[Kafka UI] -. monitoring .-> Kafka
+    Prometheus[Prometheus] -. scrape .-> KafkaExporter[kafka-exporter]
+    Grafana -. dashboards .-> Stats
 ```
 
-## Стек
+В Docker Compose также есть Kafka UI, Prometheus с kafka-exporter и Grafana.
 
-| Инструмент | Версия | Роль |
-|---|---|---|
-| Apache Kafka | 7.5.0 (Confluent) | Брокер сообщений |
-| ClickHouse | 23.8 | Аналитическое хранилище |
-| Apache Airflow | 2.8.0 | Оркестрация |
-| Grafana | 10.2.0 | Визуализация |
-| Prometheus | 2.45.0 | Сбор метрик |
-| PostgreSQL | 15 | База метаданных Airflow |
-| Python | 3.11 | Producer и Consumer |
-| Docker Compose | — | Инфраструктура |
+## Tech Stack
 
-## Сервисы и порты
+- Python для producer и consumer.
+- Apache Kafka для стриминга событий.
+- ClickHouse для raw и aggregate аналитических таблиц.
+- Apache Airflow для 5-минутных агрегаций.
+- Docker Compose для локальной инфраструктуры.
+- PostgreSQL для metadata database Airflow.
+- Prometheus и Grafana для observability.
 
-| Сервис | Порт |
-|---|---|
-| Airflow UI | 8080 |
-| Kafka UI | 8090 |
-| ClickHouse HTTP | 8123 |
-| ClickHouse native | 9000 |
-| Kafka broker 1 | 29092 |
-| Kafka broker 2 | 29093 |
-| Kafka broker 3 | 29094 |
-| Grafana | 3000 |
-| Prometheus | 9090 |
+## Data Flow
 
-## Требования
+1. Producer генерирует stateful telemetry events.
+2. События отправляются в Kafka topic `raw_data` с ключом `engine_id`.
+3. Consumer читает Kafka батчами.
+4. Consumer вставляет raw events в ClickHouse.
+5. Consumer коммитит Kafka offsets только после успешной вставки.
+6. Airflow строит идемпотентные 5-минутные агрегаты.
+7. Данные можно анализировать в ClickHouse и визуализировать в Grafana.
 
-- Docker + Docker Compose
-- Python 3.11
-- Добавить в `/etc/hosts`:
+## Engineering Highlights
 
-```
-127.0.0.1 kafka1 kafka2 kafka3
-```
+- Локальный запуск одной командой через Docker Compose.
+- Stateful telemetry simulator вместо полностью случайных значений.
+- Kafka partitioning по ключу `engine_id`.
+- ClickHouse для raw и aggregate аналитики.
+- Batch inserts в ClickHouse.
+- Manual Kafka offset commits после успешной вставки.
+- At-least-once delivery semantics.
+- Duplicate detection через `event_id`.
+- Идемпотентные Airflow aggregation windows.
+- Observability stack включен.
 
-## Быстрый старт
+## Reliability Notes
+
+Pipeline использует at-least-once delivery. Kafka offsets коммитятся только после успешной вставки в ClickHouse, поэтому сбой ClickHouse не приводит к тихой потере данных. Если сбой произойдет после вставки, но до commit offset, Kafka может переотправить записи и в `raw_data` появятся дубликаты. `event_id` позволяет найти такие дубликаты. Airflow агрегаты идемпотентны: каждый запуск удаляет и пересчитывает фиксированное 5-минутное окно.
+
+Это не exactly-once delivery и не production-ready система.
+
+## Data Model
+
+`raw_data` хранит сырые события:
+
+- `event_id`, `engine_id`, `timestamp`, `cycle`
+- sensor fields: `altitude`, `mach_number`, `throttle`, `T2`, `T50`, `P2`, `P15`, `Nf`, `Nc`, `Ps30`, `phi`, `NRf`, `NRc`, `BPR`
+- `anomaly`, `RUL`
+
+`main_stats` хранит 5-минутные окна:
+
+- `window_start`, `window_end`, `engine_id`
+- средние значения sensor metrics
+- `anomaly_count`
+- `min_RUL`
+
+## Quick Start
 
 ```bash
-# 1. Клонировать репозиторий
-git clone https://github.com/flipixcool/turbofan-de-pipeline
-cd turbofan-de-pipeline
-
-# 2. Настроить окружение
 cp .env.example .env
-# отредактируйте .env, указав свои учетные данные
-
-# 3. Собрать и запустить пайплайн
 docker compose up -d --build
+docker compose ps
+```
 
-# 4. Проверить логи producer и consumer
+## Useful URLs
+
+- Airflow: http://localhost:8080
+- Kafka UI: http://localhost:8090
+- ClickHouse HTTP: http://localhost:8123
+- Grafana: http://localhost:3000
+- Prometheus: http://localhost:9090
+
+## Verification Commands
+
+Producer logs:
+
+```bash
 docker compose logs -f producer
+```
+
+Consumer logs:
+
+```bash
 docker compose logs -f consumer
 ```
 
-Airflow: `localhost:8080` — логин из `.env` (`AIRFLOW_USER` / `AIRFLOW_PASSWORD`)  
-Grafana: `localhost:3000` — логин `admin` / значение из `.env` (`GF_SECURITY_ADMIN_PASSWORD`)  
-Kafka UI: `localhost:8090`
+Raw row count:
 
-Примечание по схеме: если изменения схемы не применились к существующему локальному ClickHouse volume, выполните `docker compose down -v`, затем `docker compose up -d --build`.
-
-## Схема данных
-
-**raw_data** — сырые события телеметрии, которые consumer записывает в реальном времени
-
-Надежность consumer: Kafka offsets коммитятся вручную только после успешной batch-вставки в ClickHouse, что дает at-least-once delivery semantics. Сырые события содержат `event_id`, поэтому дубликаты после retry можно обнаружить.
-
-| Колонка | Тип | Описание |
-|---|---|---|
-| event_id | String | Детерминированный идентификатор события для поиска дубликатов |
-| engine_id | String | Идентификатор двигателя |
-| timestamp | DateTime | Время события |
-| cycle | UInt16 | Номер полетного цикла |
-| altitude | Float32 | Высота (ft) |
-| mach_number | Float32 | Число Маха |
-| throttle | Float32 | Положение дросселя (%) |
-| T2 | Float32 | Температура на входе вентилятора (°R) |
-| T50 | Float32 | Температура на выходе LPT (°R) |
-| P2 | Float32 | Давление на входе вентилятора (psia) |
-| P15 | Float32 | Давление в bypass duct (psia) |
-| Nf | Float32 | Скорость вентилятора (rpm) |
-| Nc | Float32 | Скорость ядра (rpm) |
-| Ps30 | Float32 | Статическое давление на выходе HPC |
-| phi | Float32 | Сигнал соотношения топливо/воздух |
-| NRf | Float32 | Скорректированная скорость вентилятора |
-| NRc | Float32 | Скорректированная скорость ядра |
-| BPR | Float32 | Bypass ratio |
-| anomaly | Bool | Флаг аномалии |
-| RUL | UInt16 | Остаточный ресурс (циклы) |
-
-**main_stats** — 5-минутные агрегаты по каждому двигателю, рассчитанные Airflow DAG
-
-Airflow агрегирует фиксированные 5-минутные окна и перед вставкой удаляет/перезаписывает точное окно, поэтому retry не создает дубликаты агрегатов.
-
-| Колонка | Тип | Описание |
-|---|---|---|
-| window_start | DateTime | Начало окна агрегации, включительно |
-| window_end | DateTime | Конец окна агрегации, не включительно |
-| engine_id | String | Идентификатор двигателя |
-| avg_T2 | Float32 | Средняя температура на входе вентилятора |
-| avg_T50 | Float32 | Средняя температура на выходе турбины |
-| avg_Nf | Float32 | Средняя скорость вентилятора |
-| avg_Nc | Float32 | Средняя скорость ядра |
-| avg_P2 | Float32 | Среднее давление на входе |
-| avg_Ps30 | Float32 | Среднее статическое давление |
-| anomaly_count | UInt16 | Количество аномалий в окне |
-| min_RUL | UInt16 | Минимальный RUL в окне |
-
-## Структура проекта
-
+```bash
+docker compose exec -T clickhouse clickhouse-client \
+  --user user --password passwd --database turbofan \
+  --query "SELECT count() FROM raw_data"
 ```
-turbofan-de-pipeline/
-├── Dockerfile              # Кастомный образ Airflow с clickhouse-driver
-├── docker-compose.yml      # Полная инфраструктура с healthcheck'ами
-├── prometheus.yaml         # Конфигурация scrape для Prometheus
-├── requirements.txt        # Python-зависимости
-├── .env.example            # Шаблон переменных окружения
-├── airflow/
-│   └── dags/
-│       └── aggregation.py  # DAG: INSERT INTO main_stats каждые 5 мин
-├── consumer/
-│   └── consumer.py         # Kafka → ClickHouse consumer (batch=10)
-├── producer/
-│   └── producer.py         # Stateful producer телеметрии в стиле CMAPSS
-└── sql/
-    └── init.sql            # Схема ClickHouse (raw_data, main_stats)
+
+`event_id` presence:
+
+```bash
+docker compose exec -T clickhouse clickhouse-client \
+  --user user --password passwd --database turbofan \
+  --query "SELECT count(), countIf(event_id != '') FROM raw_data"
 ```
+
+Duplicate detection:
+
+```bash
+docker compose exec -T clickhouse clickhouse-client \
+  --user user --password passwd --database turbofan \
+  --query "SELECT event_id, count() FROM raw_data GROUP BY event_id HAVING count() > 1 LIMIT 10"
+```
+
+Aggregate windows:
+
+```bash
+docker compose exec -T clickhouse clickhouse-client \
+  --user user --password passwd --database turbofan \
+  --query "SELECT window_start, window_end, count() FROM main_stats GROUP BY window_start, window_end ORDER BY window_start DESC LIMIT 10"
+```
+
+Smoke test:
+
+```bash
+make smoke-test
+```
+
+## SQL Examples
+
+Latest raw events:
+
+```sql
+SELECT event_id, engine_id, timestamp, cycle, RUL, anomaly
+FROM raw_data
+ORDER BY timestamp DESC
+LIMIT 10;
+```
+
+Row count and non-empty `event_id` count:
+
+```sql
+SELECT count() AS rows, countIf(event_id != '') AS rows_with_event_id
+FROM raw_data;
+```
+
+Duplicate `event_id` detection:
+
+```sql
+SELECT event_id, count() AS duplicates
+FROM raw_data
+GROUP BY event_id
+HAVING duplicates > 1
+ORDER BY duplicates DESC
+LIMIT 10;
+```
+
+Minimum RUL per engine:
+
+```sql
+SELECT engine_id, min(RUL) AS min_rul
+FROM raw_data
+GROUP BY engine_id
+ORDER BY engine_id;
+```
+
+Anomaly count per engine:
+
+```sql
+SELECT engine_id, countIf(anomaly = true) AS anomaly_count
+FROM raw_data
+GROUP BY engine_id
+ORDER BY engine_id;
+```
+
+Latest 5-minute aggregate windows:
+
+```sql
+SELECT window_start, window_end, engine_id, avg_T2, avg_T50, anomaly_count, min_RUL
+FROM main_stats
+ORDER BY window_start DESC, engine_id
+LIMIT 20;
+```
+
+## Reset Local State
+
+Если старый ClickHouse volume не применил новую схему:
+
+```bash
+docker compose down -v
+docker compose up -d --build
+```
+
+## Makefile Commands
+
+```bash
+make up
+make down
+make restart
+make ps
+make logs
+make logs-producer
+make logs-consumer
+make smoke-test
+make clean
+```
+
+## Known Limitations
+
+- Используются simulated CMAPSS-inspired данные, не real CMAPSS replay.
+- Пока нет Schema Registry.
+- Пока нет dbt layer.
+- Пока нет CI/tests.
+- Grafana dashboards могут требовать ручной настройки.
+- Raw layer обнаруживает дубликаты, но не реализует exactly-once semantics.
+
+## Future Improvements
+
+- Real CMAPSS replay mode.
+- Schema Registry.
+- dbt models и data tests.
+- Deduplication через ReplacingMergeTree или materialized view.
+- Grafana dashboard provisioning.
+- CI pipeline.
+- Dead-letter queue для malformed messages.
