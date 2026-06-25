@@ -82,32 +82,34 @@ services:
     build:
       context: ./producer
       dockerfile: Dockerfile
+    restart: unless-stopped
     env_file:
       - .env
     environment:
-      KAFKA_BOOTSTRAP_SERVERS: kafka1:9092,kafka2:9092,kafka3:9092
-      KAFKA_TOPIC: raw_data
-      PRODUCER_INTERVAL_SECONDS: "1"
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS_DOCKER}
+      KAFKA_TOPIC: ${KAFKA_TOPIC}
+      PRODUCER_INTERVAL_SECONDS: ${PRODUCER_INTERVAL_SECONDS}
     depends_on: [kafka1, kafka2, kafka3]
 
   consumer:
     build:
       context: ./consumer
       dockerfile: Dockerfile
+    restart: unless-stopped
     env_file:
       - .env
     environment:
-      KAFKA_BOOTSTRAP_SERVERS: kafka1:9092,kafka2:9092,kafka3:9092
-      KAFKA_TOPIC: raw_data
-      CONSUMER_GROUP_ID: turbofan-consumer
-      CONSUMER_BATCH_SIZE: "10"
-      CLICKHOUSE_HOST: clickhouse
-      CLICKHOUSE_PORT: "9000"
-      CLICKHOUSE_USER: user
-      CLICKHOUSE_PASSWORD: passwd
-      CLICKHOUSE_DATABASE: turbofan
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS_DOCKER}
+      KAFKA_TOPIC: ${KAFKA_TOPIC}
+      CONSUMER_GROUP_ID: ${CONSUMER_GROUP_ID}
+      CONSUMER_BATCH_SIZE: ${CONSUMER_BATCH_SIZE}
+      CLICKHOUSE_HOST: ${CLICKHOUSE_HOST_DOCKER}
+      CLICKHOUSE_PORT: ${CLICKHOUSE_PORT}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_DATABASE: ${CLICKHOUSE_DATABASE}
     depends_on: [kafka1, kafka2, kafka3, clickhouse]
-  
+
   postgres-airflow:
     image: postgres:15
     ports:
@@ -152,6 +154,11 @@ services:
       _AIRFLOW_WWW_USER_PASSWORD: ${AIRFLOW_PASSWORD}
       # _PIP_ADDITIONAL_REQUIREMENTS: clickhouse-driver==0.2.7
       AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY}
+      CLICKHOUSE_HOST: ${CLICKHOUSE_HOST_DOCKER}
+      CLICKHOUSE_PORT: ${CLICKHOUSE_PORT}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_DATABASE: ${CLICKHOUSE_DATABASE}
     depends_on:
       airflow-init:
         condition: service_completed_successfully
@@ -171,6 +178,11 @@ services:
       _AIRFLOW_WWW_USER_PASSWORD: ${AIRFLOW_PASSWORD}
       # _PIP_ADDITIONAL_REQUIREMENTS: clickhouse-driver==0.2.7
       AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY}
+      CLICKHOUSE_HOST: ${CLICKHOUSE_HOST_DOCKER}
+      CLICKHOUSE_PORT: ${CLICKHOUSE_PORT}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_DATABASE: ${CLICKHOUSE_DATABASE}
     depends_on:
       airflow-init:
         condition: service_completed_successfully
